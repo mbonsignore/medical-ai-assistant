@@ -1,0 +1,101 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MessageRole {
+  user
+  assistant
+  system
+}
+
+enum AppointmentStatus {
+  BOOKED
+  CANCELLED
+}
+
+model Patient {
+  id        String   @id @default(cuid())
+  name      String
+  email     String?  @unique
+  createdAt DateTime @default(now())
+
+  chats        Chat[]
+  appointments Appointment[]
+}
+
+model Doctor {
+  id        String   @id @default(cuid())
+  name      String
+  specialty String
+  bio       String?
+  createdAt DateTime @default(now())
+
+  availability DoctorAvailability[]
+  appointments Appointment[]
+}
+
+model DoctorAvailability {
+  id          String   @id @default(cuid())
+  doctorId    String
+  weekday     Int
+  startTime   String
+  endTime     String
+  slotMinutes Int      @default(30)
+
+  doctor Doctor @relation(fields: [doctorId], references: [id])
+}
+
+model Appointment {
+  id        String            @id @default(cuid())
+  patientId String
+  doctorId  String
+  startTs   DateTime
+  endTs     DateTime
+  status    AppointmentStatus @default(BOOKED)
+  createdAt DateTime          @default(now())
+
+  patient Patient @relation(fields: [patientId], references: [id])
+  doctor  Doctor  @relation(fields: [doctorId], references: [id])
+
+  @@index([doctorId, startTs])
+  @@index([patientId, startTs])
+}
+
+model Chat {
+  id        String   @id @default(cuid())
+  patientId String
+  createdAt DateTime @default(now())
+  summary   Json?
+
+  patient  Patient   @relation(fields: [patientId], references: [id])
+  messages Message[]
+}
+
+model Message {
+  id        String      @id @default(cuid())
+  chatId    String
+  role      MessageRole
+  content   String
+  sources   Json?
+  createdAt DateTime    @default(now())
+
+  chat Chat @relation(fields: [chatId], references: [id])
+
+  @@index([chatId, createdAt])
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  source    String
+  title     String?
+  text      String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([source])
+}
