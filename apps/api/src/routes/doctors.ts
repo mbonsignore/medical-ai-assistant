@@ -131,18 +131,30 @@ export async function doctorsRoutes(app: FastifyInstance) {
     });
     if (!doctor) return reply.code(404).send({ error: "Doctor not found" });
 
-    // Fetch booked appointments in range (as instants)
+    const rangeStart = fromDt.toJSDate();
+    const rangeEnd = toDt.endOf("day").toJSDate();
+
+    // ✅ Correct overlap query: (start < rangeEnd) AND (end > rangeStart)
     const booked = await prisma.appointment.findMany({
       where: {
         doctorId,
         status: "BOOKED",
-        startTs: { gte: fromDt.toJSDate(), lte: toDt.endOf("day").toJSDate() }
+        startTs: { lt: rangeEnd },
+        endTs: { gt: rangeStart }
       },
       select: { startTs: true, endTs: true }
     });
+
     const bookedIntervals = booked.map(b => [b.startTs.getTime(), b.endTs.getTime()] as const);
 
-    const slots: Array<{ startTs: string; endTs: string }> = [];
+    const slots: Array<{
+      startTs: string;
+      endTs: string;
+      dateLocal: string;
+      startLocal: string;
+      endLocal: string;
+      timeZone: string;
+    }> = [];
 
     for (let d = fromDt; d <= toDt; d = d.plus({ days: 1 })) {
       const wd = weekdayMon1Sun7(d);
@@ -153,7 +165,7 @@ export async function doctorsRoutes(app: FastifyInstance) {
         const endM = parseTimeToMinutes(a.endTime);
 
         for (let m = startM; m + a.slotMinutes <= endM; m += a.slotMinutes) {
-          const slotStartLocal = d.plus({ minutes: m });
+          const slotStartLocal = d.plus({ minutes: m }); // in Europe/Rome
           const slotEndLocal = slotStartLocal.plus({ minutes: a.slotMinutes });
 
           const s = slotStartLocal.toMillis();
@@ -161,10 +173,13 @@ export async function doctorsRoutes(app: FastifyInstance) {
 
           const overlapsBooked = bookedIntervals.some(([bs, be]) => !(e <= bs || s >= be));
           if (!overlapsBooked) {
-            // Return ISO in UTC, but computed in Europe/Rome correctly
             slots.push({
               startTs: slotStartLocal.toUTC().toISO()!,
-              endTs: slotEndLocal.toUTC().toISO()!
+              endTs: slotEndLocal.toUTC().toISO()!,
+              dateLocal: slotStartLocal.toFormat("yyyy-LL-dd"),
+              startLocal: slotStartLocal.toFormat("HH:mm"),
+              endLocal: slotEndLocal.toFormat("HH:mm"),
+              timeZone: TZ
             });
           }
         }
