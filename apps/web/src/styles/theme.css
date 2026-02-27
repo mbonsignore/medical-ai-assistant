@@ -1,0 +1,41 @@
+:root{
+  --bg:#f5f7fb;
+  --panel:#ffffff;
+  --panel2:#f8fbff;
+  --border:#dbe3ee;
+  --text:#0f172a;
+  --muted:#64748b;
+  --primary:#2563eb;
+  --primary2:#dbeafe;
+  --shadow:0 10px 30px rgba(15, 23, 42, 0.08);
+}
+
+*{box-sizing:border-box}
+html,body,#root{height:100%;margin:0}
+body{
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: linear-gradient(180deg,#f9fbff 0%, #eef4fb 100%);
+  color:var(--text);
+}
+button,input,select,textarea{font:inherit}
+button{
+  border:1px solid var(--border);
+  background:#fff;
+  border-radius:12px;
+  padding:10px 14px;
+  cursor:pointer;
+  transition:.15s ease;
+}
+button:hover{transform:translateY(-1px); border-color:#b9c7db}
+button.primary{background:var(--primary); border-color:var(--primary); color:#fff}
+button.ghost{background:transparent}
+input,select{
+  width:100%;
+  border:1px solid var(--border);
+  border-radius:12px;
+  padding:11px 12px;
+  background:#fff;
+}
+.label{font-size:.82rem; font-weight:800; color:var(--muted); margin:0 0 6px 0}
+.small{font-size:.86rem}
+.muted{color:var(--muted)}

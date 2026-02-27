@@ -6,7 +6,13 @@ const AppointmentCreateSchema = z.object({
   patientId: z.string().min(1),
   doctorId: z.string().min(1),
   startTs: z.string().datetime(),
-  endTs: z.string().datetime()
+  endTs: z.string().datetime(),
+});
+
+const AppointmentUpdateSchema = z.object({
+  status: z.enum(["BOOKED", "CANCELLED"]).optional(),
+  startTs: z.string().datetime().optional(),
+  endTs: z.string().datetime().optional(),
 });
 
 async function createAppointment(body: z.infer<typeof AppointmentCreateSchema>, reply: any) {
@@ -19,8 +25,8 @@ async function createAppointment(body: z.infer<typeof AppointmentCreateSchema>, 
       where: {
         doctorId: body.doctorId,
         status: "BOOKED",
-        OR: [{ startTs: { lt: end }, endTs: { gt: start } }]
-      }
+        OR: [{ startTs: { lt: end }, endTs: { gt: start } }],
+      },
     });
 
     if (overlap) return { ok: false as const, error: "Slot already booked" };
@@ -31,8 +37,8 @@ async function createAppointment(body: z.infer<typeof AppointmentCreateSchema>, 
         doctorId: body.doctorId,
         startTs: start,
         endTs: end,
-        status: "BOOKED"
-      }
+        status: "BOOKED",
+      },
     });
 
     return { ok: true as const, appt };
@@ -61,7 +67,75 @@ export async function appointmentsRoutes(app: FastifyInstance) {
     return prisma.appointment.findMany({
       where: { patientId },
       orderBy: { startTs: "asc" },
-      include: { doctor: true }
+      include: { doctor: true },
     });
+  });
+
+  // GET one appointment (for modal / details)
+  app.get("/appointments/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+
+    const appt = await prisma.appointment.findUnique({
+      where: { id },
+      include: {
+        patient: { select: { id: true, name: true, email: true } },
+        doctor: { select: { id: true, name: true, specialty: true } },
+      },
+    });
+
+    if (!appt) return reply.code(404).send({ error: "Appointment not found" });
+    return appt;
+  });
+
+  // PATCH appointment (cancel / reschedule)
+  app.patch("/appointments/:id", async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const body = AppointmentUpdateSchema.parse(req.body);
+
+    const current = await prisma.appointment.findUnique({ where: { id } });
+    if (!current) return reply.code(404).send({ error: "Appointment not found" });
+
+    // Optional reschedule validation
+    let start: Date | undefined;
+    let end: Date | undefined;
+
+    if (body.startTs) start = new Date(body.startTs);
+    if (body.endTs) end = new Date(body.endTs);
+
+    if ((start && !end) || (!start && end)) {
+      return reply.code(400).send({ error: "Provide both startTs and endTs to reschedule" });
+    }
+    if (start && end && end <= start) {
+      return reply.code(400).send({ error: "endTs must be after startTs" });
+    }
+
+    // Prevent overlap if rescheduling
+    if (start && end) {
+      const overlap = await prisma.appointment.findFirst({
+        where: {
+          id: { not: id },
+          doctorId: current.doctorId,
+          status: "BOOKED",
+          startTs: { lt: end },
+          endTs: { gt: start },
+        },
+      });
+      if (overlap) return reply.code(409).send({ error: "Slot already booked" });
+    }
+
+    const updated = await prisma.appointment.update({
+      where: { id },
+      data: {
+        status: body.status,
+        startTs: start,
+        endTs: end,
+      },
+      include: {
+        patient: { select: { id: true, name: true, email: true } },
+        doctor: { select: { id: true, name: true, specialty: true } },
+      },
+    });
+
+    return updated;
   });
 }

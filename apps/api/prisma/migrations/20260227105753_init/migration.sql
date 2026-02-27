@@ -4,6 +4,9 @@ CREATE TYPE "MessageRole" AS ENUM ('user', 'assistant', 'system');
 -- CreateEnum
 CREATE TYPE "AppointmentStatus" AS ENUM ('BOOKED', 'CANCELLED');
 
+-- CreateEnum
+CREATE TYPE "UserRole" AS ENUM ('PATIENT', 'DOCTOR');
+
 -- CreateTable
 CREATE TABLE "Patient" (
     "id" TEXT NOT NULL,
@@ -84,6 +87,19 @@ CREATE TABLE "Document" (
     CONSTRAINT "Document_pkey" PRIMARY KEY ("id")
 );
 
+-- CreateTable
+CREATE TABLE "User" (
+    "id" TEXT NOT NULL,
+    "email" TEXT NOT NULL,
+    "passwordHash" TEXT NOT NULL,
+    "role" "UserRole" NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "patientId" TEXT,
+    "doctorId" TEXT,
+
+    CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Patient_email_key" ON "Patient"("email");
 
@@ -99,6 +115,15 @@ CREATE INDEX "Message_chatId_createdAt_idx" ON "Message"("chatId", "createdAt");
 -- CreateIndex
 CREATE INDEX "Document_source_idx" ON "Document"("source");
 
+-- CreateIndex
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_patientId_key" ON "User"("patientId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "User_doctorId_key" ON "User"("doctorId");
+
 -- AddForeignKey
 ALTER TABLE "DoctorAvailability" ADD CONSTRAINT "DoctorAvailability_doctorId_fkey" FOREIGN KEY ("doctorId") REFERENCES "Doctor"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
@@ -113,3 +138,9 @@ ALTER TABLE "Chat" ADD CONSTRAINT "Chat_patientId_fkey" FOREIGN KEY ("patientId"
 
 -- AddForeignKey
 ALTER TABLE "Message" ADD CONSTRAINT "Message_chatId_fkey" FOREIGN KEY ("chatId") REFERENCES "Chat"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "User" ADD CONSTRAINT "User_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "Patient"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "User" ADD CONSTRAINT "User_doctorId_fkey" FOREIGN KEY ("doctorId") REFERENCES "Doctor"("id") ON DELETE SET NULL ON UPDATE CASCADE;

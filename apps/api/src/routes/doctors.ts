@@ -20,14 +20,20 @@ const AvailabilityCreateSchema = z.object({
   slotMinutes: z.number().int().min(5).max(240).default(30)
 });
 
+const AvailabilityUpdateSchema = AvailabilityCreateSchema.partial();
+
 function parseTimeToMinutes(t: string) {
   const [hh, mm] = t.split(":").map(Number);
   return hh * 60 + mm;
 }
 
 function weekdayMon1Sun7(dt: DateTime) {
-  // luxon: weekday 1=Mon..7=Sun already
-  return dt.weekday;
+  return dt.weekday; // luxon: 1..7
+}
+
+function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
+  // overlap if (aStart < bEnd) && (aEnd > bStart)
+  return aStart < bEnd && aEnd > bStart;
 }
 
 export async function doctorsRoutes(app: FastifyInstance) {
@@ -38,7 +44,7 @@ export async function doctorsRoutes(app: FastifyInstance) {
     return reply.code(201).send(doctor);
   });
 
-  // READ ALL (con filtro specialty opzionale)
+  // READ ALL (optional specialty filter)
   app.get("/doctors", async (req) => {
     const { specialty } = req.query as { specialty?: string };
     return prisma.doctor.findMany({
@@ -47,12 +53,16 @@ export async function doctorsRoutes(app: FastifyInstance) {
     });
   });
 
-  // READ ONE (include availability)
+  // READ ONE (include availability ordered)
   app.get("/doctors/:id", async (req, reply) => {
     const { id } = req.params as { id: string };
     const doctor = await prisma.doctor.findUnique({
       where: { id },
-      include: { availability: true }
+      include: {
+        availability: {
+          orderBy: [{ weekday: "asc" }, { startTime: "asc" }]
+        }
+      }
     });
     if (!doctor) return reply.code(404).send({ error: "Doctor not found" });
     return doctor;
@@ -80,7 +90,7 @@ export async function doctorsRoutes(app: FastifyInstance) {
     }
   });
 
-  // ADD AVAILABILITY
+  // ADD AVAILABILITY (with duplicate + overlap guard)
   app.post("/doctors/:id/availability", async (req, reply) => {
     const { id: doctorId } = req.params as { id: string };
     const body = AvailabilityCreateSchema.parse(req.body);
@@ -92,6 +102,32 @@ export async function doctorsRoutes(app: FastifyInstance) {
     const endM = parseTimeToMinutes(body.endTime);
     if (endM <= startM) {
       return reply.code(400).send({ error: "endTime must be after startTime" });
+    }
+
+    // Load existing availability for same weekday
+    const existing = await prisma.doctorAvailability.findMany({
+      where: { doctorId, weekday: body.weekday },
+      orderBy: { startTime: "asc" }
+    });
+
+    // exact duplicate
+    const isDuplicate = existing.some(a =>
+      a.startTime === body.startTime &&
+      a.endTime === body.endTime &&
+      a.slotMinutes === body.slotMinutes
+    );
+    if (isDuplicate) {
+      return reply.code(409).send({ error: "Availability already exists" });
+    }
+
+    // overlap check (ignore slotMinutes: rule intervals cannot overlap)
+    const hasOverlap = existing.some(a => {
+      const aStart = parseTimeToMinutes(a.startTime);
+      const aEnd = parseTimeToMinutes(a.endTime);
+      return overlaps(startM, endM, aStart, aEnd);
+    });
+    if (hasOverlap) {
+      return reply.code(409).send({ error: "Availability overlaps an existing rule" });
     }
 
     const created = await prisma.doctorAvailability.create({
@@ -134,7 +170,6 @@ export async function doctorsRoutes(app: FastifyInstance) {
     const rangeStart = fromDt.toJSDate();
     const rangeEnd = toDt.endOf("day").toJSDate();
 
-    // ✅ Correct overlap query: (start < rangeEnd) AND (end > rangeStart)
     const booked = await prisma.appointment.findMany({
       where: {
         doctorId,
@@ -165,7 +200,7 @@ export async function doctorsRoutes(app: FastifyInstance) {
         const endM = parseTimeToMinutes(a.endTime);
 
         for (let m = startM; m + a.slotMinutes <= endM; m += a.slotMinutes) {
-          const slotStartLocal = d.plus({ minutes: m }); // in Europe/Rome
+          const slotStartLocal = d.plus({ minutes: m });
           const slotEndLocal = slotStartLocal.plus({ minutes: a.slotMinutes });
 
           const s = slotStartLocal.toMillis();
@@ -187,5 +222,102 @@ export async function doctorsRoutes(app: FastifyInstance) {
     }
 
     return { doctorId, from, to, slots };
+  });
+
+  // LIST APPOINTMENTS for doctor (optional from/to YYYY-MM-DD)
+  app.get("/doctors/:id/appointments", async (req, reply) => {
+    const { id: doctorId } = req.params as { id: string };
+    const { from, to } = req.query as { from?: string; to?: string };
+
+    const doctor = await prisma.doctor.findUnique({ where: { id: doctorId } });
+    if (!doctor) return reply.code(404).send({ error: "Doctor not found" });
+
+    let start: Date | undefined;
+    let end: Date | undefined;
+
+    if (from) {
+      const d = DateTime.fromISO(from, { zone: TZ }).startOf("day");
+      if (!d.isValid) return reply.code(400).send({ error: "Invalid 'from' date. Use YYYY-MM-DD" });
+      start = d.toJSDate();
+    }
+    if (to) {
+      const d = DateTime.fromISO(to, { zone: TZ }).endOf("day");
+      if (!d.isValid) return reply.code(400).send({ error: "Invalid 'to' date. Use YYYY-MM-DD" });
+      end = d.toJSDate();
+    }
+
+    const appointments = await prisma.appointment.findMany({
+      where: {
+        doctorId,
+        ...(start || end
+          ? {
+              startTs: {
+                ...(start ? { gte: start } : {}),
+                ...(end ? { lte: end } : {}),
+              },
+            }
+          : {}),
+      },
+      orderBy: { startTs: "asc" },
+      include: {
+        patient: { select: { id: true, name: true, email: true } },
+        doctor: { select: { id: true, name: true, specialty: true } },
+      },
+    });
+
+    return { doctorId, from: from ?? null, to: to ?? null, appointments };
+  });
+
+  // DELETE AVAILABILITY
+  app.delete("/doctors/:doctorId/availability/:availabilityId", async (req, reply) => {
+    const { doctorId, availabilityId } = req.params as {
+      doctorId: string;
+      availabilityId: string;
+    };
+
+    const avail = await prisma.doctorAvailability.findUnique({
+      where: { id: availabilityId },
+    });
+
+    if (!avail) return reply.code(404).send({ error: "Availability not found" });
+    if (avail.doctorId !== doctorId) {
+      return reply.code(403).send({ error: "Availability does not belong to this doctor" });
+    }
+
+    await prisma.doctorAvailability.delete({ where: { id: availabilityId } });
+    return reply.code(204).send();
+  });
+
+  // UPDATE AVAILABILITY
+  app.put("/doctors/:doctorId/availability/:availabilityId", async (req, reply) => {
+    const { doctorId, availabilityId } = req.params as {
+      doctorId: string;
+      availabilityId: string;
+    };
+    const body = AvailabilityUpdateSchema.parse(req.body);
+
+    const avail = await prisma.doctorAvailability.findUnique({
+      where: { id: availabilityId },
+    });
+
+    if (!avail) return reply.code(404).send({ error: "Availability not found" });
+    if (avail.doctorId !== doctorId) {
+      return reply.code(403).send({ error: "Availability does not belong to this doctor" });
+    }
+
+    const nextStart = body.startTime ?? avail.startTime;
+    const nextEnd = body.endTime ?? avail.endTime;
+    const startM = parseTimeToMinutes(nextStart);
+    const endM = parseTimeToMinutes(nextEnd);
+    if (endM <= startM) {
+      return reply.code(400).send({ error: "endTime must be after startTime" });
+    }
+
+    const updated = await prisma.doctorAvailability.update({
+      where: { id: availabilityId },
+      data: body,
+    });
+
+    return updated;
   });
 }

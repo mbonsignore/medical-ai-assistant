@@ -26,6 +26,8 @@ model Patient {
 
   chats        Chat[]
   appointments Appointment[]
+
+  user User?
 }
 
 model Doctor {
@@ -37,6 +39,8 @@ model Doctor {
 
   availability DoctorAvailability[]
   appointments Appointment[]
+
+  user User?
 }
 
 model DoctorAvailability {
@@ -98,4 +102,24 @@ model Document {
   createdAt DateTime @default(now())
 
   @@index([source])
+}
+
+
+enum UserRole {
+  PATIENT
+  DOCTOR
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  createdAt    DateTime @default(now())
+
+  patientId String? @unique
+  doctorId  String? @unique
+
+  patient Patient? @relation(fields: [patientId], references: [id])
+  doctor  Doctor?  @relation(fields: [doctorId], references: [id])
 }
