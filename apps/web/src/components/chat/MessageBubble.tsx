@@ -42,6 +42,25 @@ function formatSlotLabel(slot: any) {
   return `${datePart} ${startTime}–${endTime}`;
 }
 
+/**
+ * sources can sometimes come as:
+ * - object (ideal)
+ * - stringified JSON (happens in some setups)
+ * - null/undefined
+ */
+function parseSources(raw: any): any {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
+  if (typeof raw === "string") {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
 export function MessageBubble({
   message,
   onBook,
@@ -53,13 +72,20 @@ export function MessageBubble({
 }) {
   const isUser = message.role === "user";
 
-  const docs: RetrievedDoc[] = Array.isArray(message.sources?.docs) ? message.sources.docs : [];
-  const recDoctors = Array.isArray(message.sources?.recommendation?.doctors)
-    ? message.sources.recommendation.doctors
-    : [];
+  const sources = useMemo(() => parseSources((message as any).sources), [message]);
 
-  const triage = message.sources?.triage;
-  const ui = message.sources?.ui;
+  const docs: RetrievedDoc[] = useMemo(() => {
+    const arr = sources?.docs;
+    return Array.isArray(arr) ? arr : [];
+  }, [sources]);
+
+  const recDoctors = useMemo(() => {
+    const arr = sources?.recommendation?.doctors;
+    return Array.isArray(arr) ? arr : [];
+  }, [sources]);
+
+  const triage = sources?.triage;
+  const ui = sources?.ui;
 
   const triageLevel = triage?.triage_level || "";
   const spec = triage?.recommended_specialty || "";
@@ -68,6 +94,7 @@ export function MessageBubble({
 
   const urgencyBadge = useMemo(() => badgeColor(triageLevel), [triageLevel]);
 
+  // Retrieved docs UI
   const [showDocs, setShowDocs] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   const [docMap, setDocMap] = useState<Record<string, FullDoc>>({});
@@ -208,7 +235,7 @@ export function MessageBubble({
           </div>
         )}
 
-        {/* ✅ Retrieved docs */}
+        {/* ✅ Retrieved docs (RAG) */}
         {!isUser && docs.length > 0 && (
           <div className="msg-section">
             <button className="ghost" onClick={() => setShowDocs((p) => !p)} type="button">
@@ -221,12 +248,15 @@ export function MessageBubble({
                   <div key={d.id} className="doc">
                     <div style={{ fontWeight: 900 }}>{d.title || "Untitled"}</div>
                     <div className="small muted">
-                      {d.source} • score {typeof d.score === "number" ? d.score.toFixed(3) : "n/a"} • {d.id}
+                      {d.source} • score {typeof d.score === "number" ? d.score.toFixed(3) : "n/a"}
                     </div>
+
                     <button className="ghost" onClick={() => toggleDoc(d.id)} type="button">
                       {openId === d.id ? "Hide text" : "View text"}
                     </button>
+
                     {loadingId === d.id && <div className="small muted">Loading...</div>}
+
                     {openId === d.id && docMap[d.id] && (
                       <div className="doc-text">
                         <div className="small muted" style={{ marginBottom: 8 }}>

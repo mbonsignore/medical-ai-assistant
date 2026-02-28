@@ -5,11 +5,11 @@ import { retrieve } from "../rag/retriever";
 import { chat as ollamaChat } from "../llm/ollama";
 
 const ChatCreateSchema = z.object({
-  patientId: z.string().min(1)
+  patientId: z.string().min(1),
 });
 
 const MessageCreateSchema = z.object({
-  content: z.string().min(1)
+  content: z.string().min(1),
 });
 
 function buildContext(docs: Array<{ title: string | null; source: string; text: string }>) {
@@ -31,6 +31,27 @@ function tryParseJson(s: string): any | null {
   } catch {
     return null;
   }
+}
+
+// ✅ NEW: normalize prisma json that may come back as string
+function normalizeSources(raw: any): any | null {
+  if (!raw) return null;
+  if (typeof raw === "object") return raw;
+  if (typeof raw !== "string") return null;
+
+  // try normal JSON parse
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    // sometimes string may contain extra text; tryParseJson fallback
+    const parsed = tryParseJson(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  }
+}
+
+function normalizeMessageRow(m: any) {
+  return { ...m, sources: normalizeSources(m.sources) };
 }
 
 function todayIsoDateUtc() {
@@ -72,7 +93,7 @@ async function detectNewIssue(chatId: string, newMessage: string) {
   const previousUserMessages = await prisma.message.findMany({
     where: { chatId, role: "user" },
     orderBy: { createdAt: "desc" },
-    take: 3
+    take: 3,
   });
 
   if (previousUserMessages.length === 0) return false;
@@ -108,7 +129,6 @@ function firstSentence(s: string) {
 function hardClampNoEllipsis(s: string, maxLen: number) {
   const t = s.trim().replace(/\s+/g, " ");
   if (t.length <= maxLen) return t;
-  // cut at last space before maxLen if possible, but no "..."
   const cut = t.slice(0, maxLen);
   const lastSpace = cut.lastIndexOf(" ");
   return (lastSpace > 40 ? cut.slice(0, lastSpace) : cut).trim();
@@ -118,7 +138,7 @@ async function buildInternalChatSummary(chatId: string, isNewIssue: boolean) {
   const recentMessages = await prisma.message.findMany({
     where: { chatId },
     orderBy: { createdAt: "asc" },
-    take: 12
+    take: 12,
   });
 
   const transcript = recentMessages
@@ -150,7 +170,6 @@ async function buildInternalChatSummary(chatId: string, isNewIssue: boolean) {
   let summary = raw.trim().replace(/\s+/g, " ");
   summary = firstSentence(summary);
 
-  // light cleanup: remove common leading phrases
   summary = summary
     .replace(/\bPatient (reports|presents with|presented with|describes)\b/gi, "")
     .replace(/\bpossible\b/gi, "")
@@ -161,9 +180,7 @@ async function buildInternalChatSummary(chatId: string, isNewIssue: boolean) {
     .replace(/\s+/g, " ")
     .trim();
 
-  // keep as a single sentence and avoid UI truncation by returning a compact one
   summary = hardClampNoEllipsis(summary, 180);
-
   return summary;
 }
 
@@ -196,7 +213,7 @@ function applyUrgencyGuardrails(
       "fever",
       "convulsions",
       "head injury",
-      "blow to the head"
+      "blow to the head",
     ]);
 
   const mildDigestiveOnly =
@@ -208,7 +225,7 @@ function applyUrgencyGuardrails(
       "stomach pain after lunch",
       "mild abdominal pain",
       "indigestion",
-      "bloating"
+      "bloating",
     ]) &&
     !containsAny(msg, [
       "blood in vomit",
@@ -222,7 +239,7 @@ function applyUrgencyGuardrails(
       "severe pain",
       "persistent vomiting",
       "vomiting blood",
-      "rigid abdomen"
+      "rigid abdomen",
     ]);
 
   if (highEmergency) {
@@ -238,8 +255,8 @@ function applyUrgencyGuardrails(
       follow_up_questions: [
         "How long have you had the headache?",
         "Have you noticed stress, dehydration, or poor sleep recently?",
-        "Has the headache stayed mild or started getting worse?"
-      ]
+        "Has the headache stayed mild or started getting worse?",
+      ],
     };
   }
 
@@ -326,20 +343,23 @@ export async function chatsRoutes(app: FastifyInstance) {
     const { id: patientId } = req.params as { id: string };
     return prisma.chat.findMany({
       where: { patientId },
-      orderBy: { createdAt: "desc" }
+      orderBy: { createdAt: "desc" },
     });
   });
 
+  // ✅ UPDATED: normalize sources before returning
   app.get("/chats/:id/messages", async (req, reply) => {
     const { id: chatId } = req.params as { id: string };
 
     const chat = await prisma.chat.findUnique({ where: { id: chatId } });
     if (!chat) return reply.code(404).send({ error: "Chat not found" });
 
-    return prisma.message.findMany({
+    const rows = await prisma.message.findMany({
       where: { chatId },
-      orderBy: { createdAt: "asc" }
+      orderBy: { createdAt: "asc" },
     });
+
+    return rows.map(normalizeMessageRow);
   });
 
   app.post("/chats/:id/message", async (req, reply) => {
@@ -352,10 +372,9 @@ export async function chatsRoutes(app: FastifyInstance) {
     const isNewIssue = await detectNewIssue(chatId, body.content);
 
     const userMsg = await prisma.message.create({
-      data: { chatId, role: "user", content: body.content }
+      data: { chatId, role: "user", content: body.content },
     });
 
-    // 1) TRIAGE pass (no RAG)
     let triage = {
       triage_level: "MEDIUM",
       recommended_specialty: "General Practice",
@@ -363,9 +382,9 @@ export async function chatsRoutes(app: FastifyInstance) {
       follow_up_questions: [
         "How long have you had these symptoms?",
         "Have you noticed any worsening or additional symptoms?",
-        "Have you already tried any treatment or had any tests for this?"
+        "Have you already tried any treatment or had any tests for this?",
       ],
-      short_summary: ""
+      short_summary: "",
     };
 
     try {
@@ -379,7 +398,7 @@ export async function chatsRoutes(app: FastifyInstance) {
             Array.isArray(triageParsed.follow_up_questions) && triageParsed.follow_up_questions.length >= 3
               ? triageParsed.follow_up_questions.slice(0, 3)
               : triage.follow_up_questions,
-          short_summary: typeof triageParsed.short_summary === "string" ? triageParsed.short_summary : ""
+          short_summary: typeof triageParsed.short_summary === "string" ? triageParsed.short_summary : "",
         };
       }
     } catch {
@@ -389,18 +408,24 @@ export async function chatsRoutes(app: FastifyInstance) {
     triage = applyUrgencyGuardrails(body.content, triage);
 
     // 2) Retrieve docs after triage
-    const docs = await retrieve(body.content, 5);
+    let docs: any[] = [];
+    try {
+      docs = await retrieve(body.content, 5);
+    } catch (e) {
+      console.error("retrieve() failed:", e);
+      docs = [];
+    }
 
     const docsSources = docs.map((d) => ({
       id: d.id,
       source: d.source,
       title: d.title,
-      score: d.score
+      score: d.score,
     }));
 
     const context = buildContext(docs);
 
-    // 3) ANSWER pass (with RAG + triage)
+    // 3) Answer
     let answerText = "";
     try {
       if (triage.triage_level === "HIGH") {
@@ -414,7 +439,7 @@ export async function chatsRoutes(app: FastifyInstance) {
           triage_level: triage.triage_level,
           recommended_specialty: triage.recommended_specialty,
           red_flags: triage.red_flags,
-          isNewIssue
+          isNewIssue,
         });
 
         if (answerParsed && typeof answerParsed.answer === "string") {
@@ -436,7 +461,7 @@ export async function chatsRoutes(app: FastifyInstance) {
     if (shouldOfferBooking) {
       const doctors = await prisma.doctor.findMany({
         where: { specialty: normalizedSpecialty },
-        orderBy: { createdAt: "asc" }
+        orderBy: { createdAt: "asc" },
       });
 
       const from = todayIsoDateUtc();
@@ -462,7 +487,6 @@ export async function chatsRoutes(app: FastifyInstance) {
       data: {
         chatId,
         role: "assistant",
-        // ✅ store ONLY the answer as content (no markdown / no sections)
         content: answerText,
         sources: {
           docs: docsSources,
@@ -478,27 +502,29 @@ export async function chatsRoutes(app: FastifyInstance) {
               ? [
                   "Seek urgent in-person medical evaluation now.",
                   "Call emergency services or go to the nearest emergency department.",
-                  "Do not wait for a routine appointment."
+                  "Do not wait for a routine appointment.",
                 ]
-              : null
-          }
-        }
-      }
+              : null,
+          },
+        },
+      },
     });
 
-    // 4) clinician-facing summary for chat list
     try {
       const updatedSummary = await buildInternalChatSummary(chatId, isNewIssue);
       if (updatedSummary) {
         await prisma.chat.update({
           where: { id: chatId },
-          data: { summary: updatedSummary }
+          data: { summary: updatedSummary },
         });
       }
     } catch (e) {
       console.error("Failed to update chat summary", e);
     }
 
-    return reply.code(201).send({ userMsg, assistantMsg });
+    return reply.code(201).send({
+      userMsg: normalizeMessageRow(userMsg),
+      assistantMsg: normalizeMessageRow(assistantMsg),
+    });
   });
 }
