@@ -4,14 +4,14 @@ import { prisma } from "../db/prisma";
 import { chat as ollamaChat } from "../llm/ollama";
 
 const ReqSchema = z.object({
-  query: z.string().min(1)
+  query: z.string().min(1),
 });
 
 const SlotsReqSchema = z.object({
   query: z.string().min(1),
   from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  perDoctor: z.number().int().min(1).max(20).default(5)
+  perDoctor: z.number().int().min(1).max(20).default(5),
 });
 
 function tryParseJson(s: string): any | null {
@@ -28,10 +28,10 @@ function tryParseJson(s: string): any | null {
 
 function normalizeSpecialty(raw?: string) {
   const s = (raw || "").trim().toLowerCase();
-
   if (!s) return "General Practice";
 
   if (s.includes("emergency")) return "EMERGENCY";
+
   if (s.includes("general practitioner")) return "General Practice";
   if (s.includes("general practice")) return "General Practice";
   if (s.includes("general medicine")) return "General Practice";
@@ -42,10 +42,16 @@ function normalizeSpecialty(raw?: string) {
   if (s.includes("cardiolog")) return "Cardiology";
   if (s.includes("gastro")) return "Gastroenterology";
   if (s.includes("neurolog")) return "Neurology";
-  if (s.includes("orthopedic")) return "Orthopedics";
-  if (s.includes("orthopaedic")) return "Orthopedics";
+  if (s.includes("orthopedic") || s.includes("orthopaedic")) return "Orthopedics";
 
-  return raw!;
+  // collapse unsupported specialties to GP (so doctors exist)
+  if (s.includes("pulmon") || s.includes("pulmonary") || s.includes("respir")) return "General Practice";
+  if (s.includes("ent") || s.includes("otolaryng")) return "General Practice";
+  if (s.includes("urolog")) return "General Practice";
+  if (s.includes("gyne") || s.includes("obgyn")) return "General Practice";
+  if (s.includes("psychiatr") || s.includes("psycholog") || s.includes("mental")) return "General Practice";
+
+  return "General Practice";
 }
 
 async function triageSpecialty(query: string) {
@@ -57,11 +63,7 @@ async function triageSpecialty(query: string) {
     `- HIGH only for clear emergency or severe red-flag situations.\n` +
     `- MEDIUM for non-emergency symptoms that still deserve evaluation.\n` +
     `- LOW for mild isolated symptoms without red flags.\n` +
-    `For mild common symptoms, prefer General Practice rather than specialist referral unless specific red flags strongly indicate a specialty.\n` +
-    `Do not over-triage symptoms such as mild headache, mild nausea, mild abdominal discomfort, fatigue, or stress-related complaints unless strong red flags are explicitly present.\n` +
-    `- For broad, common digestive symptoms such as nausea, stomach pain, indigestion, bloating, or mild post-meal discomfort without major red flags, prefer General Practice.\n` +
-    `- Do not recommend Gastroenterology unless the symptom pattern clearly suggests a persistent or specialty-level digestive issue.\n` +
-    `- Do not use rare diseases to justify urgency or specialist referral for common mild symptoms.\n` +
+    `For mild common symptoms, prefer General Practice.\n` +
     `Return ONLY valid JSON with keys: recommended_specialty (string), triage_level (LOW|MEDIUM|HIGH), red_flags (array of strings).\n`;
 
   const user = `User message:\n${query}\n\nReturn the JSON now.`;
@@ -70,9 +72,9 @@ async function triageSpecialty(query: string) {
   const parsed = tryParseJson(raw);
 
   return {
-    triage_level: parsed?.triage_level ?? "MEDIUM",
-    red_flags: Array.isArray(parsed?.red_flags) ? parsed.red_flags : [],
-    recommended_specialty: normalizeSpecialty(parsed?.recommended_specialty ?? "General Practice")
+    triage_level: (String(parsed?.triage_level || "MEDIUM").toUpperCase() as "LOW" | "MEDIUM" | "HIGH"),
+    red_flags: Array.isArray(parsed?.red_flags) ? parsed.red_flags.map((x: any) => String(x)) : [],
+    recommended_specialty: normalizeSpecialty(parsed?.recommended_specialty ?? "General Practice"),
   };
 }
 
@@ -86,13 +88,13 @@ export async function recommendRoutes(app: FastifyInstance) {
         query,
         ...triage,
         doctors: [],
-        emergency: true
+        emergency: true,
       });
     }
 
     const doctors = await prisma.doctor.findMany({
       where: { specialty: triage.recommended_specialty },
-      orderBy: { createdAt: "asc" }
+      orderBy: { createdAt: "asc" },
     });
 
     return reply.send({ query, ...triage, doctors, emergency: false });
@@ -110,13 +112,13 @@ export async function recommendRoutes(app: FastifyInstance) {
         perDoctor: body.perDoctor,
         ...triage,
         doctors: [],
-        emergency: true
+        emergency: true,
       });
     }
 
     const doctors = await prisma.doctor.findMany({
       where: { specialty: triage.recommended_specialty },
-      orderBy: { createdAt: "asc" }
+      orderBy: { createdAt: "asc" },
     });
 
     const baseUrl = `http://localhost:${Number(process.env.PORT || 3001)}`;
@@ -137,7 +139,7 @@ export async function recommendRoutes(app: FastifyInstance) {
       perDoctor: body.perDoctor,
       ...triage,
       doctors: doctorsWithSlots,
-      emergency: false
+      emergency: false,
     });
   });
 }

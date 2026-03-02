@@ -94,6 +94,12 @@ export function MessageBubble({
 
   const urgencyBadge = useMemo(() => badgeColor(triageLevel), [triageLevel]);
 
+  // UI flags from backend (safe defaults)
+  const showTriageCard = ui?.showTriageCard ?? true;
+  const showFollowUps = ui?.showFollowUps ?? true;
+  const showRecommendation = ui?.showRecommendation ?? true;
+  const showIssueNote = ui?.showIssueNote ?? true;
+
   // Retrieved docs UI
   const [showDocs, setShowDocs] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -127,7 +133,7 @@ export function MessageBubble({
         <div style={{ whiteSpace: "pre-wrap" }}>{message.content}</div>
 
         {/* ✅ Quick assessment */}
-        {!isUser && triage && (
+        {!isUser && triage && showTriageCard && (
           <div className="msg-section">
             <div style={{ fontWeight: 900, marginBottom: 8 }}>Quick assessment</div>
 
@@ -180,7 +186,7 @@ export function MessageBubble({
               )}
             </div>
 
-            {followUps.length > 0 && (
+            {showFollowUps && followUps.length > 0 && (
               <div style={{ marginTop: 12 }}>
                 <div className="label">Helpful follow-up questions</div>
                 <ol style={{ margin: "6px 0 0 18px" }}>
@@ -196,7 +202,7 @@ export function MessageBubble({
         )}
 
         {/* ✅ New issue note */}
-        {!isUser && ui?.issueNote && (
+        {!isUser && showIssueNote && ui?.issueNote && (
           <div className="msg-section">
             <div
               style={{
@@ -273,7 +279,7 @@ export function MessageBubble({
         )}
 
         {/* ✅ Booking (ONLY for patient view) */}
-        {!isUser && variant === "patient" && recDoctors.length > 0 && (
+        {!isUser && variant === "patient" && showRecommendation && recDoctors.length > 0 && (
           <div className="msg-section">
             <div style={{ fontWeight: 900, marginBottom: 6 }}>Book from suggested slots</div>
 

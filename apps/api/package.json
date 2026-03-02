@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "ingest:medquad": "tsx scripts/ingest_medquad.ts",
-    "ingest:mimic:dx": "tsx scripts/ingest_mimic_demo_icd.ts",
+    "ingest:mimic:notes": "tsx scripts/ingest_mimic_notes.ts",
     "reembed": "tsx scripts/reembed_documents.ts",
     "seed": "tsx prisma/seed.ts"
   },
