@@ -5,6 +5,17 @@ import { Card } from "../../components/common/Card";
 import { EmptyState } from "../../components/common/EmptyState";
 import { MessageBubble } from "../../components/chat/MessageBubble";
 
+type ClinicalNote = {
+  chief_complaint: string;
+  timeline: string;
+  triage_and_red_flags: string;
+  suggested_specialty: string;
+  open_questions: string;
+  when_to_escalate: string;
+};
+
+type ClinicalNoteResponse = { note: ClinicalNote };
+
 export function DoctorPatientsPage() {
   const [patients, setPatients] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
@@ -14,6 +25,12 @@ export function DoctorPatientsPage() {
   const [loadingPatients, setLoadingPatients] = useState(false);
   const [loadingChats, setLoadingChats] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
+
+  // clinical note state
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [noteLoading, setNoteLoading] = useState(false);
+  const [clinicalNote, setClinicalNote] = useState<ClinicalNote | null>(null);
+  const [noteError, setNoteError] = useState<string>("");
 
   async function loadPatients() {
     setLoadingPatients(true);
@@ -32,6 +49,9 @@ export function DoctorPatientsPage() {
       setChats(res.data);
       setSelectedChat(null);
       setMessages([]);
+      setNoteOpen(false);
+      setClinicalNote(null);
+      setNoteError("");
     } finally {
       setLoadingChats(false);
     }
@@ -42,8 +62,27 @@ export function DoctorPatientsPage() {
     try {
       const res = await api.get<Message[]>(`/chats/${chatId}/messages`);
       setMessages(res.data);
+      setNoteOpen(false);
+      setClinicalNote(null);
+      setNoteError("");
     } finally {
       setLoadingMessages(false);
+    }
+  }
+
+  async function generateClinicalNote(chatId: string) {
+    setNoteLoading(true);
+    setNoteError("");
+    try {
+      const res = await api.post<ClinicalNoteResponse>("/ai/clinical-note", { chatId });
+      setClinicalNote(res.data?.note ?? null);
+      setNoteOpen(true);
+    } catch {
+      setClinicalNote(null);
+      setNoteError("Failed to generate clinical note. Please try again.");
+      setNoteOpen(true);
+    } finally {
+      setNoteLoading(false);
     }
   }
 
@@ -98,7 +137,7 @@ export function DoctorPatientsPage() {
           ) : chats.length === 0 ? (
             <EmptyState title="No chats for this patient yet." />
           ) : (
-            <div className="list">
+            <div className="list doctor-chats-list">
               {chats.map((c) => (
                 <button
                   key={c.id}
@@ -118,7 +157,22 @@ export function DoctorPatientsPage() {
         </Card>
 
         <Card>
-          <div className="card-title">Chat (read-only)</div>
+          <div className="row-between">
+            <div className="card-title">Chat (read-only)</div>
+
+            {selectedChat ? (
+              <button
+                type="button"
+                className="note-btn"
+                disabled={noteLoading}
+                onClick={() => generateClinicalNote(selectedChat.id)}
+                title="Generate a structured note for clinicians"
+              >
+                <span className="note-btn-icon">📝</span>
+                <span>{noteLoading ? "Generating..." : "Generate clinical note"}</span>
+              </button>
+            ) : null}
+          </div>
 
           {!selectedChat ? (
             <EmptyState title="Select a chat" subtitle="Messages will appear here." />
@@ -129,17 +183,84 @@ export function DoctorPatientsPage() {
           ) : (
             <div className="chat-readonly">
               {messages.map((m) => (
-                <MessageBubble
-                  key={m.id}
-                  message={m}
-                  onBook={() => {}}
-                  variant="doctor"
-                />
+                <MessageBubble key={m.id} message={m} onBook={() => {}} variant="doctor" />
               ))}
             </div>
           )}
         </Card>
       </div>
+
+      {noteOpen ? (
+        <div className="maa-modal-backdrop" role="dialog" aria-modal="true" onClick={() => setNoteOpen(false)}>
+          <div className="maa-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="maa-modal-head">
+              <div>
+                <div className="maa-modal-title">Clinical note</div>
+                <div className="small muted">
+                  {selectedPatient ? selectedPatient.name : ""}
+                  {selectedChat ? ` • ${new Date(selectedChat.createdAt).toLocaleString()}` : ""}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                className="chat-side-toggle"
+                onClick={() => setNoteOpen(false)}
+                aria-label="Close"
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="maa-modal-body">
+              {noteError ? <div className="maa-banner danger">{noteError}</div> : null}
+
+              {clinicalNote ? (
+                <div className="note-grid">
+                  <div className="note-section">
+                    <div className="note-section-title">Chief complaint</div>
+                    <div className="note-section-body">{clinicalNote.chief_complaint}</div>
+                  </div>
+
+                  <div className="note-section">
+                    <div className="note-section-title">Timeline</div>
+                    <div className="note-section-body">{clinicalNote.timeline}</div>
+                  </div>
+
+                  <div className="note-section">
+                    <div className="note-section-title">Triage & red flags</div>
+                    <div className="note-section-body">{clinicalNote.triage_and_red_flags}</div>
+                  </div>
+
+                  <div className="note-section">
+                    <div className="note-section-title">Suggested specialty</div>
+                    <div className="note-section-body">{clinicalNote.suggested_specialty}</div>
+                  </div>
+
+                  <div className="note-section">
+                    <div className="note-section-title">Open questions</div>
+                    <div className="note-section-body">{clinicalNote.open_questions}</div>
+                  </div>
+
+                  <div className="note-section">
+                    <div className="note-section-title">When to escalate</div>
+                    <div className="note-section-body">{clinicalNote.when_to_escalate}</div>
+                  </div>
+                </div>
+              ) : !noteError ? (
+                <div className="small muted">No note generated.</div>
+              ) : null}
+            </div>
+
+            <div className="maa-modal-actions">
+              <button type="button" className="btn" onClick={() => setNoteOpen(false)}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

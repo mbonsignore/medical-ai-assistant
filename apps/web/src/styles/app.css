@@ -448,3 +448,52 @@
   .chat-split.collapsed{grid-template-columns:1fr}
   .chat-side{height:auto}
 }
+
+/* Doctor chats list fixed height */
+.doctor-chats-list{
+  max-height: 260px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* "Generate clinical note" button */
+.note-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 12px;
+  border-radius:999px;
+  border:1px solid var(--border);
+  background:#fff;
+  font-weight:900;
+}
+.note-btn:hover{ background: var(--panel2); }
+.note-btn:disabled{ opacity:.7; cursor:not-allowed; }
+.note-btn-icon{ font-size:16px; line-height:1; }
+
+/* Clinical note formatting inside modal */
+.note-grid{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+.note-section{
+  border:1px solid var(--border);
+  background: var(--panel2);
+  border-radius:16px;
+  padding:12px;
+}
+.note-section-title{
+  font-weight:1000;
+  font-size:12px;
+  letter-spacing:.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom:6px;
+}
+.note-section-body{
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+  font-size: 14px;
+}

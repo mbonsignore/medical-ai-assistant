@@ -2,30 +2,27 @@
 
 Medical AI Assistant is a demo monorepo with:
 
-- a Fastify + Prisma API for auth, chat, appointments, doctors, patients, and RAG
+- a Fastify + Prisma API for auth, chat, appointments, doctor/patient records, AI helpers, and RAG
 - a React + Vite frontend with separate patient and doctor portals
-- PostgreSQL with `pgvector` for relational data and document embeddings
-- local Ollama models for triage and answer generation
+- PostgreSQL with `pgvector` for relational data and document retrieval
+- local Ollama integration for medical-chat routing/triage, answer generation, and clinical-note generation
 
 This is a demo application only. It does not provide medical advice, diagnosis, or emergency care.
 
 ## Overview
 
-Patient flow:
+Patient portal:
 
-- register or log in
-- start chats
-- receive a general-information answer, triage metadata, and retrieved document citations
-- book appointments from suggested slots or from the calendar page
-- cancel or reschedule appointments
+- start chats and receive general-information responses
+- see triage output, retrieved document citations, and suggested booking slots when appropriate
+- book, cancel, or reschedule appointments
+- get a standard non-clinical response for administrative requests such as booking/account/support actions
 
-Doctor flow:
+Doctor portal:
 
-- register or log in
 - review patients and chats in read-only mode
-- view bookings in a calendar
-- add or delete weekly availability
-- cancel or reschedule appointments
+- manage bookings and weekly availability
+- generate a structured clinical note from a selected chat
 
 ## Tech Stack
 
@@ -35,10 +32,8 @@ Backend:
 - Prisma
 - PostgreSQL
 - `pgvector`
-- Luxon for `Europe/Rome` slot generation
-- Ollama with default model names from code:
-  - `nomic-embed-text`
-  - `mistral`
+- Luxon for `Europe/Rome` scheduling logic
+- Ollama
 
 Frontend:
 
@@ -60,28 +55,31 @@ medical-ai-assistant/
 `-- pnpm-workspace.yaml
 ```
 
-Important paths:
+Key paths:
 
-- `apps/api/package.json` - API scripts
-- `apps/api/prisma/schema.prisma` - Prisma schema
-- `apps/api/prisma/seed.ts` - demo data
-- `apps/api/prisma/migrations/` - schema and pgvector SQL
-- `apps/api/scripts/` - ingest and re-embed scripts
-- `apps/api/src/routes/` - API endpoints
-- `apps/api/src/rag/retriever.ts` - pgvector retrieval
-- `apps/api/src/llm/ollama.ts` - Ollama adapter
-- `apps/web/src/app/AppRouter.tsx` - frontend routes
-- `apps/web/src/types/index.ts` - frontend types
-- `apps/web/src/components/chat/MessageBubble.tsx` - triage/docs/booking UI
+- `apps/api/src/server.ts`
+- `apps/api/src/routes/`
+- `apps/api/src/llm/ollama.ts`
+- `apps/api/src/rag/retriever.ts`
+- `apps/api/prisma/schema.prisma`
+- `apps/api/prisma/seed.ts`
+- `apps/web/src/app/AppRouter.tsx`
+- `apps/web/src/pages/patient/`
+- `apps/web/src/pages/doctor/`
 
 ## Prerequisites
 
-- Node.js compatible with this workspace and `pnpm@10.30.1`
+- Node.js compatible with the workspace and `pnpm@10.30.1`
 - pnpm
 - Docker
 - Ollama
 
-Ollama models used by default in code:
+The Ollama adapter defaults in code to:
+
+- embedding model: `nomic-embed-text`
+- chat model: `mistral`
+
+Install those locally before using AI features:
 
 ```bash
 ollama pull nomic-embed-text
@@ -90,13 +88,13 @@ ollama pull mistral
 
 ## Environment Setup
 
-Create the API env file locally from the safe example:
+Create the API env file locally from the example:
 
 ```bash
 cp apps/api/.env.example apps/api/.env
 ```
 
-The current web app does not read frontend env variables. `apps/web/src/api.ts` uses a fixed API base URL of `http://localhost:3001`.
+The current web app does not read frontend env variables. The frontend API base URL is hardcoded in `apps/web/src/api.ts`.
 
 ## First Run
 
@@ -129,7 +127,7 @@ docker compose up -d db
 pnpm --filter api exec prisma migrate deploy
 ```
 
-### 4. Seed demo relational data
+### 4. Seed demo data
 
 ```bash
 pnpm --filter api seed
@@ -137,20 +135,17 @@ pnpm --filter api seed
 
 Verified behavior from `apps/api/prisma/seed.ts`:
 
-- deletes `DoctorAvailability`, `Appointment`, `Message`, `Chat`, `User`, `Doctor`, and `Patient`
-- does not delete `Document`
-- creates demo patients and doctors
+- clears users, chats, messages, appointments, doctors, patients, and availability
+- preserves `Document`
+- creates demo patient and doctor records
 - creates weekly availability rules
-- creates one demo chat with two starter messages for the first patient
+- creates one starter chat with two messages for the first seeded patient
+
+The seed script creates demo users, but this public README intentionally does not list credentials. Check `apps/api/prisma/seed.ts` locally if you need the exact seeded records for development.
 
 ### 5. Ingest documents and compute embeddings
 
-The ingest scripts read datasets from relative `data/` directories by default:
-
-- MedQuAD: `data/medquad`
-- MIMIC demo: `data/mimic/mimic-iii-clinical-database-demo-1.4`
-
-Run the scripts you need:
+The API package includes these scripts:
 
 ```bash
 pnpm --filter api ingest:medquad
@@ -158,22 +153,25 @@ pnpm --filter api ingest:mimic:dx
 pnpm --filter api reembed
 ```
 
+Verified default dataset roots in code:
+
+- `data/medquad`
+- `data/mimic/mimic-iii-clinical-database-demo-1.4`
+
 Notes:
 
-- `reembed` only updates rows where `embedding IS NULL`
+- `reembed` only fills rows where `embedding IS NULL`
 - chat still works without documents, but retrieved-doc sections will be empty
 
 ### 6. Start the apps
 
-The root workspace does have a `dev` script:
+Start both packages:
 
 ```bash
 pnpm dev
 ```
 
-That runs `pnpm -r dev`, which starts both packages.
-
-You can also run them separately:
+Or run them separately:
 
 ```bash
 pnpm --filter api dev
@@ -183,36 +181,9 @@ pnpm --filter web dev
 ### 7. Open the app
 
 - API health check: `http://localhost:3001/health`
-- Frontend: Vite prints the local URL at startup
+- frontend: Vite prints the local URL on startup
 
 There is no custom Vite dev-server port configured in `apps/web/vite.config.ts`.
-
-## Demo Users
-
-The seed script creates these accounts and assigns them all the same fake demo password:
-
-```text
-Password123!
-```
-
-Patients:
-
-- `mario.rossi@example.com`
-- `giulia.verdi@example.com`
-- `luca.romano@example.com`
-- `francesca.bianchi@example.com`
-- `alessandro.greco@example.com`
-- `chiara.conti@example.com`
-
-Doctors:
-
-- `luca.bianchi@clinic.example.com`
-- `martina.gallo@clinic.example.com`
-- `elena.conti@clinic.example.com`
-- `marco.rinaldi@clinic.example.com`
-- `sara.greco@clinic.example.com`
-- `paolo.ferri@clinic.example.com`
-- `chiara.sala@clinic.example.com`
 
 ## Useful Commands
 
@@ -266,12 +237,6 @@ pnpm --filter api ingest:mimic:dx
 pnpm --filter api reembed
 ```
 
-Open Prisma Studio:
-
-```bash
-pnpm --filter api exec prisma studio
-```
-
 Inspect the running database inside the verified container:
 
 ```bash
@@ -284,171 +249,88 @@ docker exec health_db psql -U postgres -d health -c 'SELECT id, source, title FR
 
 Routes are registered in `apps/api/src/server.ts`.
 
-Demo limitation:
+Current demo limitation:
 
 - the frontend uses bearer tokens and route guards
-- the backend only enforces bearer-token auth on `GET /auth/me`
-- most other API routes do not currently enforce auth or ownership checks
+- backend auth is only enforced on `GET /auth/me`
+- most domain routes do not currently enforce auth or ownership checks
 
 ### Health
 
 - `GET /health`
-  - Auth header: none
-  - Body/query: none
 
 ### Auth
 
 - `POST /auth/register`
-  - Auth header: none
-  - Body: `email`, `password`, `role`, `name`, optional `specialty`, optional `bio`
-
+  - body: `email`, `password`, `role`, `name`, optional `specialty`, optional `bio`
 - `POST /auth/login`
-  - Auth header: none
-  - Body: `email`, `password`
-
+  - body: `email`, `password`
 - `GET /auth/me`
-  - Auth header: `Authorization: Bearer <token>`
-  - Body/query: none
+  - header: `Authorization: Bearer <token>`
 
 ### Patients
 
 - `POST /patients`
-  - Auth header: none enforced
-  - Body: `name`, optional `email`
-
 - `GET /patients`
-  - Auth header: none enforced
-  - Body/query: none
-
 - `GET /patients/:id`
-  - Auth header: none enforced
-  - Body/query: none
-
 - `PUT /patients/:id`
-  - Auth header: none enforced
-  - Body: partial `name`, `email`
-
 - `DELETE /patients/:id`
-  - Auth header: none enforced
-  - Body/query: none
-
 - `GET /patients/:id/appointments`
-  - Auth header: none enforced
-  - Body/query: none
-
 - `GET /patients/:id/chats`
-  - Auth header: none enforced
-  - Body/query: none
 
 ### Doctors
 
 - `POST /doctors`
-  - Auth header: none enforced
-  - Body: `name`, `specialty`, optional `bio`
-
 - `GET /doctors`
-  - Auth header: none enforced
-  - Query: optional `specialty`
-
 - `GET /doctors/:id`
-  - Auth header: none enforced
-  - Body/query: none
-
 - `PUT /doctors/:id`
-  - Auth header: none enforced
-  - Body: partial `name`, `specialty`, `bio`
-
 - `DELETE /doctors/:id`
-  - Auth header: none enforced
-  - Body/query: none
-
 - `POST /doctors/:id/availability`
-  - Auth header: none enforced
-  - Body: `weekday`, `startTime`, `endTime`, `slotMinutes`
-
 - `PUT /doctors/:doctorId/availability/:availabilityId`
-  - Auth header: none enforced
-  - Body: partial `weekday`, `startTime`, `endTime`, `slotMinutes`
-
 - `DELETE /doctors/:doctorId/availability/:availabilityId`
-  - Auth header: none enforced
-  - Body/query: none
-
 - `GET /doctors/:id/slots`
-  - Auth header: none enforced
-  - Query: `from=YYYY-MM-DD`, `to=YYYY-MM-DD`
-  - Returns free slots generated in `Europe/Rome` and serialized with UTC timestamps plus local display fields
-
+  - query: `from=YYYY-MM-DD`, `to=YYYY-MM-DD`
 - `GET /doctors/:id/appointments`
-  - Auth header: none enforced
-  - Query: optional `from=YYYY-MM-DD`, optional `to=YYYY-MM-DD`
+  - query: optional `from=YYYY-MM-DD`, optional `to=YYYY-MM-DD`
 
 ### Appointments
 
 - `POST /appointments`
-  - Auth header: none enforced
-  - Body: `patientId`, `doctorId`, `startTs`, `endTs`
-
 - `POST /bookings`
-  - Auth header: none enforced
-  - Body: `patientId`, `doctorId`, `startTs`, `endTs`
-  - Alias of the same booking logic
-
 - `GET /appointments/:id`
-  - Auth header: none enforced
-  - Body/query: none
-
 - `PATCH /appointments/:id`
-  - Auth header: none enforced
-  - Body:
-    - cancel: `status`
-    - reschedule: `startTs`, `endTs`, optional `status`
 
 ### Chats
 
 - `POST /chats`
-  - Auth header: none enforced
-  - Body: `patientId`
-
-- `GET /patients/:id/chats`
-  - Auth header: none enforced
-  - Body/query: none
-
+  - body: `patientId`
 - `GET /chats/:id/messages`
-  - Auth header: none enforced
-  - Body/query: none
-  - Response rows normalize `sources` before returning
-
 - `POST /chats/:id/message`
-  - Auth header: none enforced
-  - Body: `content`
-  - Stores both the user message and an assistant message with `sources`
+  - body: `content`
+  - non-admin messages go through router/triage, retrieval, answer generation, and recommendation logic
+  - admin-style requests are handled by a deterministic bypass that returns a standard manage-in-app response
 
-### Documents
+### Documents / RAG / Recommendations
 
 - `GET /documents/:id`
-  - Auth header: none enforced
-  - Body/query: none
-
-### RAG / Recommendation helpers
-
 - `POST /rag/seed`
-  - Auth header: none enforced
-  - Body/query: none
-
 - `POST /rag/query`
-  - Auth header: none enforced
-  - Body: `query`
-
 - `POST /recommend/doctor`
-  - Auth header: none enforced
-  - Body: `query`
-
 - `POST /recommend/doctor-slots`
-  - Auth header: none enforced
-  - Body: `query`, `from`, `to`, optional `perDoctor`
 
-## Frontend Routes and Behavior
+### AI Clinical Note
+
+- `POST /ai/clinical-note`
+  - body: `chatId`
+  - returns a structured note with:
+    - `chief_complaint`
+    - `timeline`
+    - `triage_and_red_flags`
+    - `suggested_specialty`
+    - `open_questions`
+    - `when_to_escalate`
+
+## Frontend Routes and Features
 
 Routes from `apps/web/src/app/AppRouter.tsx`:
 
@@ -461,20 +343,19 @@ Routes from `apps/web/src/app/AppRouter.tsx`:
 - `/doctor/patients`
 - `/doctor/calendar`
 
-Notable behavior verified in code:
+Verified behavior:
 
-- patient chat shows a typing indicator while waiting for the API
-- patient chat can flag a new issue and suggest starting a new chat
-- assistant messages can show triage, red flags, follow-up questions, and retrieved docs
+- patient chat shows typing state while waiting for the API
+- assistant messages can show triage, follow-up questions, retrieved docs, emergency actions, and booking suggestions
+- a new unrelated issue can trigger a visible issue note
+- admin-style chat requests skip medical triage UI
 - retrieved document text is fetched lazily from `GET /documents/:id`
-- suggested booking slots can be booked from chat
 - patient and doctor calendars support cancel and reschedule flows
-- slot lists are grouped into morning and afternoon sections in calendar pages
-- appointment updates are broadcast across tabs with `BroadcastChannel("maa_appointments")` and a `localStorage` fallback
+- the doctor patient view includes a “Generate clinical note” action and a structured modal view of the note
 
 ## Troubleshooting
 
-### `PATCH` requests fail in the browser
+### Browser `PATCH` requests fail
 
 Check the Fastify CORS config in `apps/api/src/server.ts`. The current allowed methods include:
 
@@ -484,7 +365,7 @@ Check the Fastify CORS config in `apps/api/src/server.ts`. The current allowed m
 
 ### Retrieved docs are empty
 
-Check whether documents exist and whether embeddings were generated:
+Check both document count and embedding count:
 
 ```bash
 docker exec health_db psql -U postgres -d health -c 'SELECT COUNT(*) FROM "Document";'
@@ -501,17 +382,11 @@ pnpm --filter api reembed
 
 ### Ollama calls fail
 
-The API code defaults to:
-
-- `http://localhost:11434`
-- `nomic-embed-text`
-- `mistral`
-
-Make sure Ollama is running and those models are available.
+The adapter defaults in code to `http://localhost:11434`, `nomic-embed-text`, and `mistral`. Make sure Ollama is running and those models are installed locally.
 
 ### `psql` is not installed locally
 
-Use the containerized client instead:
+Use the database client inside the running container:
 
 ```bash
 docker exec -it health_db psql -U postgres -d health
@@ -532,7 +407,3 @@ pnpm --filter api exec tsx -e '(async () => {
   await prisma.$disconnect();
 })()'
 ```
-
-### Calendar state behaves oddly after changes
-
-`apps/web/src/components/calendar/CalendarView.tsx` is used as a controlled wrapper. Keep `view`, `date`, `onView`, and `onNavigate` wired together when extending it.

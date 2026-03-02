@@ -394,7 +394,7 @@ async function runRouterAndTriageLLM(params: {
     `- Mentions of "atrial fibrillation", "AFib", arrhythmia, palpitations, blood thinners/anticoagulants => usually Cardiology.\n` +
     `- If asking what AF means or treatment questions (e.g., blood thinners) and no emergency symptoms now => usually MEDIUM (not LOW).\n` +
     `\n` +
-    `Fever guidance (avoid over-triage):\n` +
+    `Fever guidance (avoid over-triage), if user says he has fever it is LOW, if it specifies the temperature it depends:\n` +
     `- ~38°C (100.4°F) for a few hours with no other red flags => usually LOW.\n` +
     `- >=39°C (102.2°F), persistent >48h, or concerning context => MEDIUM.\n` +
     `- Fever + severe red flags (confusion, stiff neck, severe breathing issues) => MEDIUM/HIGH.\n` +

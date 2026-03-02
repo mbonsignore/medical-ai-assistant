@@ -9,6 +9,7 @@ import { ragRoutes } from "./routes/rag";
 import { recommendRoutes } from "./routes/recommend";
 import { authRoutes } from "./routes/auth";
 import { documentsRoutes } from "./routes/documents";
+import { aiRoutes } from "./routes/ai"; // ✅ ADD
 
 const app = Fastify({ logger: true });
 
@@ -23,7 +24,6 @@ app.setErrorHandler((err, _req, reply) => {
   if (err instanceof ZodError) {
     return reply.code(400).send({ error: "Validation error", details: err.issues });
   }
-  // Useful during dev:
   app.log.error(err);
   return reply.code(500).send({ error: "Internal Server Error" });
 });
@@ -38,6 +38,7 @@ await app.register(chatsRoutes);
 await app.register(ragRoutes);
 await app.register(recommendRoutes);
 await app.register(documentsRoutes);
+await app.register(aiRoutes); // ✅ ADD (order doesn’t matter much)
 
 const port = Number(process.env.PORT || 3001);
 await app.listen({ port, host: "0.0.0.0" });
