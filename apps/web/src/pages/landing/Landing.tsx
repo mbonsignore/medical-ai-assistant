@@ -25,6 +25,31 @@ function scoreLabel(score: number) {
   return "Very strong";
 }
 
+function extractApiError(e: any): string {
+  const status = e?.response?.status;
+  const data = e?.response?.data;
+
+  // standard: { error: "..." }
+  if (data?.error && typeof data.error === "string") return data.error;
+
+  // zod/validation: { error: "...", details: [...] }
+  if (typeof data?.message === "string") return data.message;
+
+  // fastify default might be { message: "...", statusCode: ... }
+  if (typeof data?.message === "string") return data.message;
+
+  // auth-friendly fallbacks
+  if (status === 401) return "Invalid email or password.";
+  if (status === 409) return "An account with this email already exists.";
+  if (status === 429) return "Too many attempts. Please wait and try again.";
+
+  // network errors
+  if (e?.code === "ERR_NETWORK") return "Network error. Is the API running on http://localhost:3001?";
+  if (typeof e?.message === "string" && e.message.trim()) return e.message;
+
+  return "Something went wrong.";
+}
+
 export function Landing() {
   const { login, register } = useAuth();
 
@@ -99,7 +124,7 @@ export function Landing() {
         });
       }
     } catch (e: any) {
-      setErr(e?.response?.data?.error || e?.message || "Something went wrong");
+      setErr(extractApiError(e));
     } finally {
       setBusy(false);
     }

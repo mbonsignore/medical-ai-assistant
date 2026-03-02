@@ -198,18 +198,7 @@ async function main() {
     );
   }
 
-  // =========================================================
-  // OPTIONAL: create a demo chat + a couple messages (no RAG docs)
-  // Keeps UI from looking empty on first run.
-  // =========================================================
-  const demoPatient = patients[0];
-  const chat = await prisma.chat.create({ data: { patientId: demoPatient.id, summary: null } });
-  await prisma.message.createMany({
-    data: [
-      { chatId: chat.id, role: "user", content: "Hi, I have a mild headache since this morning." },
-      { chatId: chat.id, role: "assistant", content: "Thanks — can you tell me if you have fever or vision changes?" },
-    ],
-  });
+
 
   // =========================================================
   // OUTPUT
